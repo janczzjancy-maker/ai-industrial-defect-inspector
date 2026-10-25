@@ -1,6 +1,5 @@
 
 
-
 import streamlit as st
 from PIL import Image
 import numpy as np
@@ -52,7 +51,7 @@ def load_model(path):
 
 def predict_image(image):
     if not MODEL_PATH.exists():
-        return None, None, "Model file not found"
+        return None, None, None, "Model file not found"
 
     try:
         model = load_model(str(MODEL_PATH))
@@ -65,13 +64,18 @@ def predict_image(image):
             np.asarray(model.predict(arr, verbose=0)).reshape(-1)[0]
         )
 
+        # Show the raw model output to help verify label mapping.
         if raw >= 0.5:
-            return "GOOD", raw * 100, None
+            label = "GOOD"
+            confidence = raw * 100
+        else:
+            label = "DEFECTIVE"
+            confidence = (1 - raw) * 100
 
-        return "DEFECTIVE", (1 - raw) * 100, None
+        return label, confidence, raw, None
 
     except Exception as e:
-        return None, None, str(e)
+        return None, None, None, str(e)
 
 
 left, right = st.columns(2)
@@ -113,31 +117,35 @@ with right:
                     key=f"inspect_{index}",
                     type="primary"
                 ):
-                    label, confidence, error = predict_image(image)
+                    label, confidence, raw, error = predict_image(image)
 
                     if error:
-                        st.error(
-                            "AI prediction could not be completed."
-                        )
+                        st.error("AI prediction could not be completed.")
                         with st.expander("Technical details"):
                             st.code(error)
 
-                    elif label == "GOOD":
-                        st.success(
-                            f"✅ GOOD — {confidence:.2f}% confidence"
-                        )
+                    else:
+                        st.write(f"Raw model output: {raw:.6f}")
+
+                        if label == "GOOD":
+                            st.success(
+                                f"✅ GOOD — {confidence:.2f}% model score"
+                            )
+                        else:
+                            st.error(
+                                f"⚠️ DEFECTIVE — {confidence:.2f}% model score"
+                            )
+
                         st.metric(
-                            "Prediction Confidence",
+                            "Prediction Score",
                             f"{confidence:.2f}%"
                         )
 
-                    else:
-                        st.error(
-                            f"⚠️ DEFECTIVE — {confidence:.2f}% confidence"
-                        )
-                        st.metric(
-                            "Prediction Confidence",
-                            f"{confidence:.2f}%"
+                        st.warning(
+                            "Confirm the model's training class order "
+                            "before relying on the GOOD/DEFECTIVE label. "
+                            "The displayed score is not a calibrated "
+                            "probability unless the model supports that."
                         )
 
             except Exception as e:
@@ -158,20 +166,15 @@ c3.metric("Recall", "100.00%")
 
 st.subheader("Confusion Matrix")
 
-st.write("Actual defective products: 453")
-st.write("Actual good products: 262")
-
 st.markdown("""
-| Test result | Count |
-|---|---:|
-| Defective correctly identified | 451 |
-| Good correctly identified | 262 |
-| Good incorrectly classified as defective | 2 |
-| Defective incorrectly classified as good | 0 |
+| Actual class | Predicted Defective | Predicted Good |
+|---|---:|---:|
+| Defective | 451 | 2 |
+| Good | 0 | 262 |
 """)
 
 st.caption(
-    "These metrics are from the previously reported test results. "
+    "These metrics are from previously reported test results. "
     "They are not recalculated by this dashboard."
 )
 
