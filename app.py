@@ -1,5 +1,4 @@
 
-
 import streamlit as st
 from PIL import Image
 import numpy as np
@@ -33,6 +32,7 @@ div[data-testid="stMetric"] {
 """, unsafe_allow_html=True)
 
 st.title("🏭 AI Industrial Defect Inspector")
+st.markdown("**Project By: Mary Johnsilin**")
 st.caption("Computer Vision • Industrial Casting Quality Inspection")
 
 MODEL_PATH = Path(__file__).parent / "industrial_defect_model.keras"
@@ -64,7 +64,7 @@ def predict_image(image):
             np.asarray(model.predict(arr, verbose=0)).reshape(-1)[0]
         )
 
-        # Show the raw model output to help verify label mapping.
+        # Verify this mapping against the model's training labels.
         if raw >= 0.5:
             label = "GOOD"
             confidence = raw * 100
@@ -141,11 +141,10 @@ with right:
                             f"{confidence:.2f}%"
                         )
 
-                        st.warning(
-                            "Confirm the model's training class order "
-                            "before relying on the GOOD/DEFECTIVE label. "
-                            "The displayed score is not a calibrated "
-                            "probability unless the model supports that."
+                        st.caption(
+                            "The label depends on the model's training "
+                            "class mapping. The score may not be a "
+                            "calibrated probability."
                         )
 
             except Exception as e:
