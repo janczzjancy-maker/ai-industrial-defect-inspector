@@ -1,4 +1,5 @@
 
+
 import streamlit as st
 from PIL import Image
 import numpy as np
@@ -63,7 +64,7 @@ def predict_image(image):
             np.asarray(model.predict(arr, verbose=0)).reshape(-1)[0]
         )
 
-        # Assumes output >= 0.5 means GOOD.
+        # Verify this mapping against your model's training labels.
         if raw >= 0.5:
             return "GOOD", raw * 100, None
 
@@ -73,7 +74,7 @@ def predict_image(image):
         return None, None, str(e)
 
 
-left, right = st.columns([1, 1])
+left, right = st.columns(2)
 
 with left:
     st.subheader("1. Upload Product Images")
@@ -84,11 +85,11 @@ with left:
         accept_multiple_files=True
     )
 
-    if uploaded_files and len(uploaded_files) > 3:
-        st.warning("Please upload a maximum of 3 images.")
-        uploaded_files = uploaded_files[:3]
+    st.caption("Select up to 3 industrial casting images.")
 
-    st.caption("Upload clear industrial casting product images.")
+    if uploaded_files and len(uploaded_files) > 3:
+        st.warning("Maximum 3 images allowed.")
+        uploaded_files = uploaded_files[:3]
 
 with right:
     st.subheader("2. Inspection Results")
@@ -100,26 +101,23 @@ with right:
 
             try:
                 image = Image.open(uploaded_file).convert("RGB")
+
+                # Compatible with older Streamlit versions.
                 st.image(
                     image,
                     caption=uploaded_file.name,
-                    use_container_width=True
+                    use_column_width=True
                 )
 
                 if st.button(
                     f"🔍 Inspect Product {index}",
                     key=f"inspect_{index}",
-                    type="primary",
-                    use_container_width=True
+                    type="primary"
                 ):
                     label, confidence, error = predict_image(image)
 
                     if error:
-                        st.error(
-                            "AI model could not run. "
-                            "Please check that the trained model file "
-                            "is included in the project."
-                        )
+                        st.error("AI prediction could not be completed.")
                         with st.expander("Technical details"):
                             st.code(error)
 
@@ -147,30 +145,26 @@ with right:
     else:
         st.write("Upload images to see inspection results here.")
 
-
 st.divider()
 st.subheader("📊 Model Evaluation")
 
 c1, c2, c3 = st.columns(3)
-
 c1.metric("Accuracy", "Not evaluated")
 c2.metric("Precision", "Not evaluated")
 c3.metric("Recall", "Not evaluated")
 
 st.caption(
-    "Add verified test-dataset evaluation results to display "
-    "actual model performance."
+    "Enter verified test-dataset metrics to display actual performance."
 )
 
 st.divider()
 st.subheader("📄 Inspection Report")
 
 st.write(
-    "Use your browser's Print option to save this page as a PDF. "
-    "A downloadable inspection history is not included in this version."
+    "Use your browser's Print option to save this page as PDF. "
+    "Downloadable inspection history is not included yet."
 )
 
 st.caption(
-    "Note: Defect heatmaps and visual defect highlighting "
-    "are not implemented in this version."
+    "Defect heatmaps and visual defect highlighting are not implemented."
 )
