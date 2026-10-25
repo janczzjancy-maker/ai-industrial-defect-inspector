@@ -51,6 +51,7 @@ def load_model(path):
     import tensorflow as tf
     return tf.keras.models.load_model(path)
 
+
 def predict_image(image):
     if not MODEL_PATH.exists():
         return None, None, None, "Model file not found"
@@ -66,7 +67,7 @@ def predict_image(image):
             np.asarray(model.predict(arr, verbose=0)).reshape(-1)[0]
         )
 
-        # Confirm label mapping using the training class names.
+        # Confirm label mapping with the training class names.
         if raw >= 0.5:
             label = "GOOD"
             confidence = raw * 100
@@ -79,6 +80,7 @@ def predict_image(image):
     except Exception as e:
         return None, None, None, str(e)
 
+
 # ---------------- SIDEBAR ----------------
 page = st.sidebar.radio(
     "Navigation",
@@ -89,7 +91,7 @@ history = st.session_state.inspection_history
 
 # ---------------- HOME ----------------
 if page == "Home":
-    st.header("Welcome to Industrial Quality Inspection")
+    st.header("🏠 Welcome to Industrial Quality Inspection")
 
     total = len(history)
     defective = sum(x["Prediction"] == "DEFECTIVE" for x in history)
@@ -100,12 +102,12 @@ if page == "Home":
     c2.metric("Defective Products", defective)
     c3.metric("OK Products", good)
 
+    st.subheader("Project Features")
     st.markdown("""
-    ### Project Features
     - Upload industrial casting images
     - AI prediction: GOOD or DEFECTIVE
-    - Prediction score
-    - Inspection history
+    - Prediction confidence score
+    - Inspection dashboard and history
     - Downloadable CSV report
     """)
 
@@ -151,8 +153,6 @@ elif page == "Inspect Product":
                             st.code(error)
 
                     else:
-                        st.write(f"Raw model output: {raw:.6f}")
-
                         if label == "GOOD":
                             st.success(
                                 f"✅ GOOD — {confidence:.2f}% model score"
@@ -163,20 +163,25 @@ elif page == "Inspect Product":
                             )
 
                         st.metric("Prediction Score", f"{confidence:.2f}%")
+                        st.write(f"Raw model output: {raw:.6f}")
 
-                        # Save inspection result to session history
-                        st.session_state.inspection_history.append({
-                            "Image Name": uploaded_file.name,
-                            "Prediction": label,
-                            "Confidence (%)": round(confidence, 2),
-                            "Raw Output": round(raw, 6),
-                            "Inspection Time": datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            )
-                        })
+                        # Avoid duplicate history entries on reruns
+                        record_key = f"saved_{uploaded_file.name}_{index}"
+
+                        if record_key not in st.session_state:
+                            st.session_state.inspection_history.append({
+                                "Image Name": uploaded_file.name,
+                                "Prediction": label,
+                                "Confidence (%)": round(confidence, 2),
+                                "Raw Output": round(raw, 6),
+                                "Inspection Time": datetime.now().strftime(
+                                    "%Y-%m-%d %H:%M:%S"
+                                )
+                            })
+                            st.session_state[record_key] = True
 
                         st.caption(
-                            "The label mapping must match the model's "
+                            "Confirm the label mapping against the model's "
                             "training labels. The score may not be a "
                             "calibrated probability."
                         )
@@ -186,9 +191,10 @@ elif page == "Inspect Product":
     else:
         st.info("Upload images to start inspection.")
 
-# ---------------- DASHBOARD ----------------
+# ---------------- INSPECTION DASHBOARD ----------------
 elif page == "Inspection Dashboard":
     st.header("📊 Inspection Dashboard")
+    st.caption("Industrial Product Quality Overview")
 
     history = st.session_state.inspection_history
 
@@ -196,37 +202,89 @@ elif page == "Inspection Dashboard":
     defective = sum(x["Prediction"] == "DEFECTIVE" for x in history)
     good = sum(x["Prediction"] == "GOOD" for x in history)
 
+    # Summary metrics
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Inspections", total)
-    c2.metric("Defective Products", defective)
-    c3.metric("OK Products", good)
+    c1.metric("📦 Total Inspections", total)
+    c2.metric("🚨 Defective Products", defective)
+    c3.metric("✅ OK Products", good)
 
     if history:
+        history_df = pd.DataFrame(history)
+
+        st.divider()
+
+        # Product status bar chart
         st.subheader("📈 Product Status")
 
-        chart_data = pd.DataFrame({
+        status_df = pd.DataFrame({
             "Product Status": ["Defective", "OK"],
             "Count": [defective, good]
         }).set_index("Product Status")
 
-        st.bar_chart(chart_data)
+        st.bar_chart(status_df)
 
-        st.subheader("📋 Inspection History")
-        history_df = pd.DataFrame(history)
-        st.dataframe(history_df, use_container_width=True)
+        # Pie chart
+        st.subheader("🍩 Quality Distribution")
 
+        if total > 0:
+            pie_df = pd.DataFrame({
+                "Status": ["Defective", "OK"],
+                "Count": [defective, good]
+            })
+
+            pie_df = pie_df[pie_df["Count"] > 0]
+
+            st.vega_lite_chart(
+                pie_df,
+                {
+                    "mark": {"type": "arc", "innerRadius": 65},
+                    "encoding": {
+                        "theta": {
+                            "field": "Count",
+                            "type": "quantitative"
+                        },
+                        "color": {
+                            "field": "Status",
+                            "type": "nominal",
+                            "scale": {
+                                "domain": ["Defective", "OK"],
+                                "range": ["#ff4b4b", "#00cc96"]
+                            }
+                        },
+                        "tooltip": [
+                            {"field": "Status", "type": "nominal"},
+                            {"field": "Count", "type": "quantitative"}
+                        ]
+                    },
+                    "width": "container",
+                    "height": 300
+                },
+                use_container_width=True
+            )
+
+        st.divider()
+
+        # Recent inspection history
+        st.subheader("📋 Recent Inspection History")
+
+        recent_df = history_df.iloc[::-1].head(10).reset_index(drop=True)
+        st.dataframe(recent_df, use_container_width=True)
+
+        # CSV download
         csv_data = history_df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
-            "⬇️ Download Inspection Report (CSV)",
+            label="⬇️ Download Inspection Report (CSV)",
             data=csv_data,
             file_name="inspection_report.csv",
-            mime="text/csv"
+            mime="text/csv",
+            key="download_inspection_report"
         )
+
     else:
         st.info(
-            "No inspection history yet. Go to Inspect Product "
-            "and inspect an image first."
+            "No inspection history yet. Go to Inspect Product, "
+            "upload an image and click Inspect Product first."
         )
 
 # ---------------- MODEL EVALUATION ----------------
