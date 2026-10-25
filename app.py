@@ -6,7 +6,6 @@ import pandas as pd
 from PIL import Image
 from pathlib import Path
 from datetime import datetime
-import io
 
 st.set_page_config(
     page_title="AI Industrial Defect Inspector",
@@ -20,10 +19,15 @@ IMG_SIZE = (128, 128)
 @st.cache_resource
 def load_model():
     if MODEL_PATH.exists():
-        return tf.keras.models.load_model(MODEL_PATH)
+        return tf.keras.models.load_model(str(MODEL_PATH))
     return None
 
-model = load_model()
+try:
+    model = load_model()
+    model_error = None
+except Exception as e:
+    model = None
+    model_error = str(e)
 
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -39,25 +43,35 @@ page = st.sidebar.radio(
 
 def predict_image(image):
     if model is None:
-        return None, None, "Model file not found"
+        return None, None, (
+            model_error or
+            "Model file not found. Add industrial_defect_model.keras."
+        )
 
-    image = image.convert("RGB").resize(IMG_SIZE)
-    arr = np.asarray(image, dtype=np.float32)
-    arr = np.expand_dims(arr, axis=0)
+    try:
+        image = image.convert("RGB").resize(IMG_SIZE)
+        arr = np.asarray(image, dtype=np.float32)
+        arr = np.expand_dims(arr, axis=0)
 
-    # Model includes Rescaling(1./255), so do not divide here.
-    raw = float(model.predict(arr, verbose=0).reshape(-1)[0])
+        # Model contains Rescaling(1./255).
+        raw = float(model.predict(arr, verbose=0).reshape(-1)[0])
 
-    # Training class order: def_front = 0, ok_front = 1.
-    # Sigmoid output corresponds to class index 1.
-    if raw >= 0.5:
-        label = "GOOD"
-        confidence = raw * 100
-    else:
-        label = "DEFECTIVE"
-        confidence = (1 - raw) * 100
+        if not 0 <= raw <= 1:
+            return None, None, f"Unexpected model output: {raw}"
 
-    return label, confidence, None
+        # This assumes sigmoid output 0 = DEFECTIVE, 1 = GOOD.
+        if raw >= 0.5:
+            label = "GOOD"
+            confidence = raw * 100
+        else:
+            label = "DEFECTIVE"
+            confidence = (1 - raw) * 100
+
+        return label, confidence, None
+
+    except Exception as e:
+        return None, None, str(e)
+
 
 if page == "Inspect Product":
     st.subheader("📷 Upload Product Images")
@@ -70,37 +84,53 @@ if page == "Inspect Product":
 
     if files and st.button("🔍 Inspect Products", type="primary"):
         for file in files:
-            image = Image.open(file).convert("RGB")
-            label, confidence, error = predict_image(image)
+            try:
+                image = Image.open(file).convert("RGB")
+                label, confidence, error = predict_image(image)
 
-            st.divider()
-            col1, col2 = st.columns([1, 1])
+                st.divider()
+                col1, col2 = st.columns(2)
 
-            with col1:
-                st.image(image, caption=file.name, use_container_width=True)
+                with col1:
+                    # Compatible with older Streamlit versions
+                    st.image(
+                        image,
+                        caption=file.name,
+                        use_column_width=True
+                    )
 
-            with col2:
-                if error:
-                    st.error(error)
-                    continue
+                with col2:
+                    if error:
+                        st.error(f"Prediction failed: {error}")
+                        continue
 
-                if label == "DEFECTIVE":
-                    st.error("⚠️ DEFECTIVE")
-                else:
-                    st.success("✅ GOOD")
+                    if label == "DEFECTIVE":
+                        st.error("⚠️ DEFECTIVE")
+                    else:
+                        st.success("✅ GOOD")
 
-                st.metric("Model Confidence", f"{confidence:.2f}%")
-                st.caption(
-                    "Prediction is based on the trained model. "
-                    "Please verify results before making quality decisions."
-                )
+                    st.metric(
+                        "Model Confidence",
+                        f"{confidence:.2f}%"
+                    )
 
-                st.session_state.history.append({
-                    "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "Image": file.name,
-                    "Result": label,
-                    "Confidence (%)": round(confidence, 2)
-                })
+                    st.caption(
+                        "AI prediction only. Verify results before "
+                        "making industrial quality decisions."
+                    )
+
+                    st.session_state.history.append({
+                        "Time": datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                        "Image": file.name,
+                        "Result": label,
+                        "Confidence (%)": round(confidence, 2)
+                    })
+
+            except Exception as e:
+                st.error(f"Could not process {file.name}: {e}")
+
 
 elif page == "Dashboard & Reports":
     st.subheader("📊 Inspection Dashboard")
@@ -110,8 +140,14 @@ elif page == "Dashboard & Reports":
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Total Inspections", len(df))
-        c2.metric("Defective", int((df["Result"] == "DEFECTIVE").sum()))
-        c3.metric("Good", int((df["Result"] == "GOOD").sum()))
+        c2.metric(
+            "Defective",
+            int((df["Result"] == "DEFECTIVE").sum())
+        )
+        c3.metric(
+            "Good",
+            int((df["Result"] == "GOOD").sum())
+        )
 
         st.dataframe(df, use_container_width=True)
 
@@ -125,16 +161,19 @@ elif page == "Dashboard & Reports":
     else:
         st.info("No inspections yet. Inspect a product first.")
 
+
 elif page == "About":
     st.subheader("About This Project")
     st.write(
         "AI Industrial Defect Inspector classifies industrial casting "
-        "images as GOOD or DEFECTIVE using a trained TensorFlow model."
+        "images as GOOD or DEFECTIVE using a TensorFlow model."
     )
     st.write("Team Members: Sri Vishwa and Mary Johnsilin")
 
+
 if model is None:
     st.warning(
-        "AI model not found. Add industrial_defect_model.keras "
-        "to the GitHub repository before using predictions."
+        "AI model is unavailable. Check that "
+        "industrial_defect_model.keras exists in the repository "
+        "and that its dependencies are installed."
     )
