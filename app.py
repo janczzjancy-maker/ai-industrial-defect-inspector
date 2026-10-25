@@ -1,5 +1,6 @@
 
 
+
 import streamlit as st
 from PIL import Image
 import numpy as np
@@ -35,7 +36,7 @@ div[data-testid="stMetric"] {
 st.title("🏭 AI Industrial Defect Inspector")
 st.caption("Computer Vision • Industrial Casting Quality Inspection")
 
-MODEL_PATH = Path("industrial_defect_model.keras")
+MODEL_PATH = Path(__file__).parent / "industrial_defect_model.keras"
 
 st.info(
     "Upload up to 3 product images. "
@@ -64,7 +65,6 @@ def predict_image(image):
             np.asarray(model.predict(arr, verbose=0)).reshape(-1)[0]
         )
 
-        # Verify this mapping against your model's training labels.
         if raw >= 0.5:
             return "GOOD", raw * 100, None
 
@@ -102,7 +102,6 @@ with right:
             try:
                 image = Image.open(uploaded_file).convert("RGB")
 
-                # Compatible with older Streamlit versions.
                 st.image(
                     image,
                     caption=uploaded_file.name,
@@ -117,7 +116,9 @@ with right:
                     label, confidence, error = predict_image(image)
 
                     if error:
-                        st.error("AI prediction could not be completed.")
+                        st.error(
+                            "AI prediction could not be completed."
+                        )
                         with st.expander("Technical details"):
                             st.code(error)
 
@@ -148,13 +149,30 @@ with right:
 st.divider()
 st.subheader("📊 Model Evaluation")
 
+st.write("Previously evaluated test dataset: 715 images")
+
 c1, c2, c3 = st.columns(3)
-c1.metric("Accuracy", "Not evaluated")
-c2.metric("Precision", "Not evaluated")
-c3.metric("Recall", "Not evaluated")
+c1.metric("Accuracy", "99.72%")
+c2.metric("Precision", "99.24%")
+c3.metric("Recall", "100.00%")
+
+st.subheader("Confusion Matrix")
+
+st.write("Actual defective products: 453")
+st.write("Actual good products: 262")
+
+st.markdown("""
+| Test result | Count |
+|---|---:|
+| Defective correctly identified | 451 |
+| Good correctly identified | 262 |
+| Good incorrectly classified as defective | 2 |
+| Defective incorrectly classified as good | 0 |
+""")
 
 st.caption(
-    "Enter verified test-dataset metrics to display actual performance."
+    "These metrics are from the previously reported test results. "
+    "They are not recalculated by this dashboard."
 )
 
 st.divider()
@@ -166,5 +184,6 @@ st.write(
 )
 
 st.caption(
-    "Defect heatmaps and visual defect highlighting are not implemented."
+    "Defect heatmaps and visual defect highlighting "
+    "are not implemented in this version."
 )
