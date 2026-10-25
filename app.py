@@ -1,4 +1,5 @@
 
+
 import streamlit as st
 from PIL import Image
 import numpy as np
@@ -14,16 +15,9 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp {
-    background: #081426;
-    color: #eef4ff;
-}
-[data-testid="stSidebar"] {
-    background: #101f35;
-}
-h1, h2, h3 {
-    color: #eef4ff;
-}
+.stApp { background: #081426; color: #eef4ff; }
+[data-testid="stSidebar"] { background: #101f35; }
+h1, h2, h3 { color: #eef4ff; }
 div[data-testid="stMetric"] {
     background: #12243d;
     border: 1px solid #29415f;
@@ -45,7 +39,7 @@ if "inspection_history" not in st.session_state:
 @st.cache_resource
 def load_model(path):
     import tensorflow as tf
-    return tf.keras.models.load_model(path)
+    return tf.keras.models.load_model(path, compile=False)
 
 def predict_image(image):
     if not MODEL_PATH.exists():
@@ -58,25 +52,19 @@ def predict_image(image):
         arr = np.asarray(image_rgb, dtype=np.float32) / 255.0
         arr = np.expand_dims(arr, axis=0)
 
-        output = np.asarray(
-            model.predict(arr, verbose=0)
-        )
+        output = np.asarray(model.predict(arr, verbose=0))
 
-        # Support a single-output binary classifier.
         if output.size != 1:
             return None, None, None, (
-                "This app expects a binary classification model "
-                "with one output. The current model has multiple outputs."
+                f"Expected one output, but model returned shape {output.shape}"
             )
 
         raw = float(output.reshape(-1)[0])
 
         if not np.isfinite(raw):
-            return None, None, None, "The model returned an invalid score."
+            return None, None, None, "Invalid model output"
 
-        # IMPORTANT:
-        # This mapping must match the labels used during model training.
-        # Verify whether output near 1 means GOOD or DEFECTIVE.
+        # This mapping must match the original training labels.
         if raw >= 0.5:
             label = "GOOD"
             confidence = raw * 100
@@ -91,18 +79,13 @@ def predict_image(image):
 
 page = st.sidebar.radio(
     "Navigation",
-    [
-        "Home",
-        "Inspect Product",
-        "Inspection Dashboard",
-        "Model Evaluation"
-    ]
+    ["Home", "Inspect Product", "Inspection Dashboard", "Model Evaluation"]
 )
 
 history = st.session_state.inspection_history
 
 if page == "Home":
-    st.header("🏠 Welcome to Industrial Quality Inspection")
+    st.header("🏠 Industrial Quality Inspection")
 
     total = len(history)
     defective = sum(x["Prediction"] == "DEFECTIVE" for x in history)
@@ -115,29 +98,24 @@ if page == "Home":
 
     st.subheader("Project Features")
     st.markdown("""
-    - Upload industrial casting images
-    - AI prediction: GOOD or DEFECTIVE
-    - Prediction score
-    - Inspection dashboard and history
-    - Downloadable CSV report
+    - Industrial casting image upload
+    - GOOD / DEFECTIVE classification
+    - Model output and prediction score
+    - Inspection history
+    - CSV report download
     """)
-
-    st.info(
-        "Prediction reliability depends on the trained model "
-        "and the correct class-label mapping."
-    )
 
 elif page == "Inspect Product":
     st.header("📷 Inspect Industrial Products")
 
     uploaded_files = st.file_uploader(
-        "Choose up to 3 JPG or PNG images",
+        "Upload JPG or PNG images (maximum 3)",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=True
     )
 
     if uploaded_files and len(uploaded_files) > 3:
-        st.warning("Maximum 3 images allowed.")
+        st.warning("Only the first 3 images will be inspected.")
         uploaded_files = uploaded_files[:3]
 
     if uploaded_files:
@@ -161,29 +139,23 @@ elif page == "Inspect Product":
                     label, confidence, raw, error = predict_image(image)
 
                     if error:
-                        st.error("AI prediction could not be completed.")
+                        st.error("Prediction failed")
                         st.code(error)
                     else:
-                        if label == "GOOD":
-                            st.success(
-                                f"✅ GOOD — Model score: {confidence:.2f}%"
-                            )
-                        else:
-                            st.error(
-                                f"⚠️ DEFECTIVE — Model score: {confidence:.2f}%"
-                            )
-
+                        st.write(f"Model output: {raw:.6f}")
                         st.metric("Prediction Score", f"{confidence:.2f}%")
-                        st.write(f"Raw model output: {raw:.6f}")
+
+                        if label == "DEFECTIVE":
+                            st.error(f"⚠️ DEFECTIVE — {confidence:.2f}%")
+                        else:
+                            st.success(f"✅ GOOD — {confidence:.2f}%")
 
                         st.warning(
-                            "Verify the model's training label mapping before "
-                            "relying on this result for real inspections."
+                            "Confirm the training label mapping and "
+                            "preprocessing before relying on this prediction."
                         )
 
-                        record_key = (
-                            f"saved_{uploaded_file.name}_{index}"
-                        )
+                        record_key = f"saved_{uploaded_file.name}_{index}"
 
                         if record_key not in st.session_state:
                             st.session_state.inspection_history.append({
@@ -198,13 +170,12 @@ elif page == "Inspect Product":
                             st.session_state[record_key] = True
 
             except Exception as e:
-                st.error(f"Could not open this image: {e}")
+                st.error(f"Could not open image: {e}")
     else:
-        st.info("Upload images to start inspection.")
+        st.info("Upload an image to start inspection.")
 
 elif page == "Inspection Dashboard":
     st.header("📊 Inspection Dashboard")
-    st.caption("Industrial Product Quality Overview")
 
     history = st.session_state.inspection_history
     total = len(history)
@@ -219,14 +190,11 @@ elif page == "Inspection Dashboard":
     if history:
         history_df = pd.DataFrame(history)
 
-        st.divider()
         st.subheader("📈 Product Status")
-
         status_df = pd.DataFrame({
             "Product Status": ["Defective", "OK"],
             "Count": [defective, good]
         }).set_index("Product Status")
-
         st.bar_chart(status_df)
 
         st.subheader("📋 Recent Inspection History")
@@ -235,36 +203,28 @@ elif page == "Inspection Dashboard":
             use_container_width=True
         )
 
-        csv_data = history_df.to_csv(index=False).encode("utf-8")
-
         st.download_button(
-            label="⬇️ Download Inspection Report (CSV)",
-            data=csv_data,
+            "⬇️ Download Inspection Report (CSV)",
+            data=history_df.to_csv(index=False).encode("utf-8"),
             file_name="inspection_report.csv",
-            mime="text/csv",
-            key="download_inspection_report"
+            mime="text/csv"
         )
     else:
-        st.info(
-            "No inspection history yet. Upload an image in "
-            "Inspect Product and run an inspection first."
-        )
+        st.info("No inspection history yet.")
 
 elif page == "Model Evaluation":
     st.header("📈 Model Evaluation")
-
     st.warning(
-        "These are previously reported test metrics, not recalculated "
-        "by this dashboard. Verify them against the current model."
+        "The following are previously reported values, not recalculated "
+        "by this app. Verify them against the current model."
     )
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Previously Reported Accuracy", "99.72%")
-    c2.metric("Previously Reported Precision", "99.24%")
-    c3.metric("Previously Reported Recall", "100.00%")
+    c1.metric("Reported Accuracy", "99.72%")
+    c2.metric("Reported Precision", "99.24%")
+    c3.metric("Reported Recall", "100.00%")
 
     st.subheader("Previously Reported Confusion Matrix")
-
     st.markdown("""
     | Actual class | Predicted Defective | Predicted Good |
     |---|---:|---:|
@@ -272,10 +232,7 @@ elif page == "Model Evaluation":
     | Good | 0 | 262 |
     """)
 
-    st.caption(
-        "These metrics are historical values and have not been "
-        "independently verified against the currently deployed model."
-    )
+    st.caption("Historical metrics are not recalculated here.")
 
 st.divider()
 st.caption(
