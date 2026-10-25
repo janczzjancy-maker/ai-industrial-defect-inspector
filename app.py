@@ -12,7 +12,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------- STYLE ----------------
 st.markdown("""
 <style>
 .stApp {
@@ -34,23 +33,19 @@ div[data-testid="stMetric"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- HEADER ----------------
 st.title("🏭 AI Industrial Defect Inspector")
 st.markdown("**Project By: Mary Johnsilin**")
 st.caption("Computer Vision • Industrial Casting Quality Inspection")
 
 MODEL_PATH = Path(__file__).parent / "industrial_defect_model.keras"
 
-# ---------------- HISTORY ----------------
 if "inspection_history" not in st.session_state:
     st.session_state.inspection_history = []
 
-# ---------------- MODEL ----------------
 @st.cache_resource
 def load_model(path):
     import tensorflow as tf
     return tf.keras.models.load_model(path)
-
 
 def predict_image(image):
     if not MODEL_PATH.exists():
@@ -63,11 +58,25 @@ def predict_image(image):
         arr = np.asarray(image_rgb, dtype=np.float32) / 255.0
         arr = np.expand_dims(arr, axis=0)
 
-        raw = float(
-            np.asarray(model.predict(arr, verbose=0)).reshape(-1)[0]
+        output = np.asarray(
+            model.predict(arr, verbose=0)
         )
 
-        # Confirm label mapping with the training class names.
+        # Support a single-output binary classifier.
+        if output.size != 1:
+            return None, None, None, (
+                "This app expects a binary classification model "
+                "with one output. The current model has multiple outputs."
+            )
+
+        raw = float(output.reshape(-1)[0])
+
+        if not np.isfinite(raw):
+            return None, None, None, "The model returned an invalid score."
+
+        # IMPORTANT:
+        # This mapping must match the labels used during model training.
+        # Verify whether output near 1 means GOOD or DEFECTIVE.
         if raw >= 0.5:
             label = "GOOD"
             confidence = raw * 100
@@ -80,16 +89,18 @@ def predict_image(image):
     except Exception as e:
         return None, None, None, str(e)
 
-
-# ---------------- SIDEBAR ----------------
 page = st.sidebar.radio(
     "Navigation",
-    ["Home", "Inspect Product", "Inspection Dashboard", "Model Evaluation"]
+    [
+        "Home",
+        "Inspect Product",
+        "Inspection Dashboard",
+        "Model Evaluation"
+    ]
 )
 
 history = st.session_state.inspection_history
 
-# ---------------- HOME ----------------
 if page == "Home":
     st.header("🏠 Welcome to Industrial Quality Inspection")
 
@@ -106,12 +117,16 @@ if page == "Home":
     st.markdown("""
     - Upload industrial casting images
     - AI prediction: GOOD or DEFECTIVE
-    - Prediction confidence score
+    - Prediction score
     - Inspection dashboard and history
     - Downloadable CSV report
     """)
 
-# ---------------- INSPECT PRODUCT ----------------
+    st.info(
+        "Prediction reliability depends on the trained model "
+        "and the correct class-label mapping."
+    )
+
 elif page == "Inspect Product":
     st.header("📷 Inspect Industrial Products")
 
@@ -132,8 +147,6 @@ elif page == "Inspect Product":
 
             try:
                 image = Image.open(uploaded_file).convert("RGB")
-
-                # Compatible with older Streamlit versions
                 st.image(
                     image,
                     caption=uploaded_file.name,
@@ -149,24 +162,28 @@ elif page == "Inspect Product":
 
                     if error:
                         st.error("AI prediction could not be completed.")
-                        with st.expander("Technical details"):
-                            st.code(error)
-
+                        st.code(error)
                     else:
                         if label == "GOOD":
                             st.success(
-                                f"✅ GOOD — {confidence:.2f}% model score"
+                                f"✅ GOOD — Model score: {confidence:.2f}%"
                             )
                         else:
                             st.error(
-                                f"⚠️ DEFECTIVE — {confidence:.2f}% model score"
+                                f"⚠️ DEFECTIVE — Model score: {confidence:.2f}%"
                             )
 
                         st.metric("Prediction Score", f"{confidence:.2f}%")
                         st.write(f"Raw model output: {raw:.6f}")
 
-                        # Avoid duplicate history entries on reruns
-                        record_key = f"saved_{uploaded_file.name}_{index}"
+                        st.warning(
+                            "Verify the model's training label mapping before "
+                            "relying on this result for real inspections."
+                        )
+
+                        record_key = (
+                            f"saved_{uploaded_file.name}_{index}"
+                        )
 
                         if record_key not in st.session_state:
                             st.session_state.inspection_history.append({
@@ -180,29 +197,20 @@ elif page == "Inspect Product":
                             })
                             st.session_state[record_key] = True
 
-                        st.caption(
-                            "Confirm the label mapping against the model's "
-                            "training labels. The score may not be a "
-                            "calibrated probability."
-                        )
-
             except Exception as e:
                 st.error(f"Could not open this image: {e}")
     else:
         st.info("Upload images to start inspection.")
 
-# ---------------- INSPECTION DASHBOARD ----------------
 elif page == "Inspection Dashboard":
     st.header("📊 Inspection Dashboard")
     st.caption("Industrial Product Quality Overview")
 
     history = st.session_state.inspection_history
-
     total = len(history)
     defective = sum(x["Prediction"] == "DEFECTIVE" for x in history)
     good = sum(x["Prediction"] == "GOOD" for x in history)
 
-    # Summary metrics
     c1, c2, c3 = st.columns(3)
     c1.metric("📦 Total Inspections", total)
     c2.metric("🚨 Defective Products", defective)
@@ -212,8 +220,6 @@ elif page == "Inspection Dashboard":
         history_df = pd.DataFrame(history)
 
         st.divider()
-
-        # Product status bar chart
         st.subheader("📈 Product Status")
 
         status_df = pd.DataFrame({
@@ -223,54 +229,12 @@ elif page == "Inspection Dashboard":
 
         st.bar_chart(status_df)
 
-        # Pie chart
-        st.subheader("🍩 Quality Distribution")
-
-        if total > 0:
-            pie_df = pd.DataFrame({
-                "Status": ["Defective", "OK"],
-                "Count": [defective, good]
-            })
-
-            pie_df = pie_df[pie_df["Count"] > 0]
-
-            st.vega_lite_chart(
-                pie_df,
-                {
-                    "mark": {"type": "arc", "innerRadius": 65},
-                    "encoding": {
-                        "theta": {
-                            "field": "Count",
-                            "type": "quantitative"
-                        },
-                        "color": {
-                            "field": "Status",
-                            "type": "nominal",
-                            "scale": {
-                                "domain": ["Defective", "OK"],
-                                "range": ["#ff4b4b", "#00cc96"]
-                            }
-                        },
-                        "tooltip": [
-                            {"field": "Status", "type": "nominal"},
-                            {"field": "Count", "type": "quantitative"}
-                        ]
-                    },
-                    "width": "container",
-                    "height": 300
-                },
-                use_container_width=True
-            )
-
-        st.divider()
-
-        # Recent inspection history
         st.subheader("📋 Recent Inspection History")
+        st.dataframe(
+            history_df.iloc[::-1].head(10).reset_index(drop=True),
+            use_container_width=True
+        )
 
-        recent_df = history_df.iloc[::-1].head(10).reset_index(drop=True)
-        st.dataframe(recent_df, use_container_width=True)
-
-        # CSV download
         csv_data = history_df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
@@ -280,24 +244,26 @@ elif page == "Inspection Dashboard":
             mime="text/csv",
             key="download_inspection_report"
         )
-
     else:
         st.info(
-            "No inspection history yet. Go to Inspect Product, "
-            "upload an image and click Inspect Product first."
+            "No inspection history yet. Upload an image in "
+            "Inspect Product and run an inspection first."
         )
 
-# ---------------- MODEL EVALUATION ----------------
 elif page == "Model Evaluation":
     st.header("📈 Model Evaluation")
-    st.write("Previously evaluated test dataset: 715 images")
+
+    st.warning(
+        "These are previously reported test metrics, not recalculated "
+        "by this dashboard. Verify them against the current model."
+    )
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Accuracy", "99.72%")
-    c2.metric("Precision", "99.24%")
-    c3.metric("Recall", "100.00%")
+    c1.metric("Previously Reported Accuracy", "99.72%")
+    c2.metric("Previously Reported Precision", "99.24%")
+    c3.metric("Previously Reported Recall", "100.00%")
 
-    st.subheader("Confusion Matrix")
+    st.subheader("Previously Reported Confusion Matrix")
 
     st.markdown("""
     | Actual class | Predicted Defective | Predicted Good |
@@ -307,15 +273,14 @@ elif page == "Model Evaluation":
     """)
 
     st.caption(
-        "These metrics are from previously reported test results. "
-        "They are not recalculated by this dashboard."
+        "These metrics are historical values and have not been "
+        "independently verified against the currently deployed model."
     )
 
-# ---------------- FOOTER ----------------
 st.divider()
 st.caption(
     "AI Industrial Defect Inspector • Industrial Casting Quality Inspection"
 )
 st.caption(
-    "Visual defect highlighting is not implemented in this version."
+    "Automatic visual defect highlighting is not implemented in this version."
 )
