@@ -2,7 +2,9 @@
 import streamlit as st
 from PIL import Image
 import numpy as np
+import pandas as pd
 from pathlib import Path
+from datetime import datetime
 
 st.set_page_config(
     page_title="AI Industrial Defect Inspector",
@@ -10,6 +12,7 @@ st.set_page_config(
     layout="wide"
 )
 
+# -------------------- STYLE --------------------
 st.markdown("""
 <style>
 .stApp {
@@ -31,23 +34,24 @@ div[data-testid="stMetric"] {
 </style>
 """, unsafe_allow_html=True)
 
+# -------------------- HEADER --------------------
 st.title("🏭 AI Industrial Defect Inspector")
 st.markdown("**Project By: Mary Johnsilin**")
 st.caption("Computer Vision • Industrial Casting Quality Inspection")
 
 MODEL_PATH = Path(__file__).parent / "industrial_defect_model.keras"
 
-st.info(
-    "Upload up to 3 product images. "
-    "AI predictions require the trained model file."
-)
+st.info("Upload up to 3 product images and inspect their quality.")
 
+# -------------------- INSPECTION HISTORY --------------------
+if "inspection_history" not in st.session_state:
+    st.session_state.inspection_history = []
 
+# -------------------- MODEL --------------------
 @st.cache_resource
 def load_model(path):
     import tensorflow as tf
     return tf.keras.models.load_model(path)
-
 
 def predict_image(image):
     if not MODEL_PATH.exists():
@@ -64,7 +68,7 @@ def predict_image(image):
             np.asarray(model.predict(arr, verbose=0)).reshape(-1)[0]
         )
 
-        # Verify this mapping against the model's training labels.
+        # Confirm this mapping against the model's training labels.
         if raw >= 0.5:
             label = "GOOD"
             confidence = raw * 100
@@ -77,115 +81,201 @@ def predict_image(image):
     except Exception as e:
         return None, None, None, str(e)
 
+# -------------------- NAVIGATION --------------------
+page = st.sidebar.radio(
+    "Navigation",
+    ["Home", "Inspect Product", "Inspection Dashboard", "Model Evaluation"]
+)
 
-left, right = st.columns(2)
+# -------------------- HOME --------------------
+if page == "Home":
+    st.header("Welcome to Industrial Quality Inspection")
 
-with left:
-    st.subheader("1. Upload Product Images")
-
-    uploaded_files = st.file_uploader(
-        "Choose up to 3 JPG or PNG images",
-        type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Inspections", len(st.session_state.inspection_history))
+    col2.metric(
+        "Defective Products",
+        sum(
+            x["Prediction"] == "DEFECTIVE"
+            for x in st.session_state.inspection_history
+        )
+    )
+    col3.metric(
+        "OK Products",
+        sum(
+            x["Prediction"] == "GOOD"
+            for x in st.session_state.inspection_history
+        )
     )
 
-    st.caption("Select up to 3 industrial casting images.")
+    st.markdown("""
+    ### Project Features
+    - Upload industrial casting images
+    - Predict GOOD or DEFECTIVE using the trained model
+    - View prediction confidence score
+    - Track inspection history
+    - Download inspection reports
+    """)
 
-    if uploaded_files and len(uploaded_files) > 3:
-        st.warning("Maximum 3 images allowed.")
-        uploaded_files = uploaded_files[:3]
+# -------------------- INSPECT PRODUCT --------------------
+elif page == "Inspect Product":
+    left, right = st.columns(2)
 
-with right:
-    st.subheader("2. Inspection Results")
+    with left:
+        st.subheader("📷 Upload Product Images")
 
-    if uploaded_files:
-        for index, uploaded_file in enumerate(uploaded_files, start=1):
-            st.divider()
-            st.markdown(f"### Product {index}")
+        uploaded_files = st.file_uploader(
+            "Choose up to 3 JPG or PNG images",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True
+        )
 
-            try:
-                image = Image.open(uploaded_file).convert("RGB")
+        if uploaded_files and len(uploaded_files) > 3:
+            st.warning("Maximum 3 images allowed.")
+            uploaded_files = uploaded_files[:3]
 
-                st.image(
-                    image,
-                    caption=uploaded_file.name,
-                    use_column_width=True
-                )
+    with right:
+        st.subheader("🔍 Inspection Results")
 
-                if st.button(
-                    f"🔍 Inspect Product {index}",
-                    key=f"inspect_{index}",
-                    type="primary"
-                ):
-                    label, confidence, raw, error = predict_image(image)
+        if uploaded_files:
+            for index, uploaded_file in enumerate(uploaded_files, start=1):
+                st.divider()
+                st.markdown(f"### Product {index}")
 
-                    if error:
-                        st.error("AI prediction could not be completed.")
-                        with st.expander("Technical details"):
-                            st.code(error)
+                try:
+                    image = Image.open(uploaded_file).convert("RGB")
+                    st.image(
+                        image,
+                        caption=uploaded_file.name,
+                        use_container_width=True
+                    )
 
-                    else:
-                        st.write(f"Raw model output: {raw:.6f}")
+                    if st.button(
+                        f"Inspect Product {index}",
+                        key=f"inspect_{uploaded_file.name}_{index}",
+                        type="primary"
+                    ):
+                        label, confidence, raw, error = predict_image(image)
 
-                        if label == "GOOD":
-                            st.success(
-                                f"✅ GOOD — {confidence:.2f}% model score"
-                            )
+                        if error:
+                            st.error("AI prediction could not be completed.")
+                            with st.expander("Technical details"):
+                                st.code(error)
                         else:
-                            st.error(
-                                f"⚠️ DEFECTIVE — {confidence:.2f}% model score"
+                            st.write(f"Raw model output: {raw:.6f}")
+
+                            if label == "GOOD":
+                                st.success(
+                                    f"✅ GOOD — {confidence:.2f}% model score"
+                                )
+                            else:
+                                st.error(
+                                    f"⚠️ DEFECTIVE — {confidence:.2f}% model score"
+                                )
+
+                            st.metric("Prediction Score", f"{confidence:.2f}%")
+
+                            # Avoid adding duplicate history entries
+                            if "last_inspected" not in st.session_state:
+                                st.session_state.last_inspected = {}
+
+                            inspection_key = uploaded_file.name
+                            if st.session_state.last_inspected.get(inspection_key) != raw:
+                                st.session_state.inspection_history.append({
+                                    "Image Name": uploaded_file.name,
+                                    "Prediction": label,
+                                    "Confidence (%)": round(confidence, 2),
+                                    "Raw Output": round(raw, 6),
+                                    "Inspection Time": datetime.now().strftime(
+                                        "%Y-%m-%d %H:%M:%S"
+                                    )
+                                })
+                                st.session_state.last_inspected[inspection_key] = raw
+
+                            st.caption(
+                                "The label depends on the model's training "
+                                "class mapping. The score may not be a "
+                                "calibrated probability."
                             )
 
-                        st.metric(
-                            "Prediction Score",
-                            f"{confidence:.2f}%"
-                        )
+                except Exception as e:
+                    st.error(f"Could not open this image: {e}")
+        else:
+            st.info("Upload product images to start inspection.")
 
-                        st.caption(
-                            "The label depends on the model's training "
-                            "class mapping. The score may not be a "
-                            "calibrated probability."
-                        )
+# -------------------- INSPECTION DASHBOARD --------------------
+elif page == "Inspection Dashboard":
+    st.header("📊 Inspection Dashboard")
 
-            except Exception as e:
-                st.error(f"Could not open this image: {e}")
+    history = st.session_state.inspection_history
 
+    total = len(history)
+    defective = sum(x["Prediction"] == "DEFECTIVE" for x in history)
+    good = sum(x["Prediction"] == "GOOD" for x in history)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Inspections", total)
+    c2.metric("Defective Products", defective)
+    c3.metric("OK Products", good)
+
+    if total > 0:
+        st.subheader("📈 Product Status")
+
+        chart_data = pd.DataFrame({
+            "Product Status": ["Defective", "OK"],
+            "Count": [defective, good]
+        }).set_index("Product Status")
+
+        st.bar_chart(chart_data)
+
+        st.subheader("📋 Inspection History")
+        history_df = pd.DataFrame(history)
+        st.dataframe(history_df, use_container_width=True)
+
+        csv_data = history_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            "⬇️ Download Inspection Report (CSV)",
+            data=csv_data,
+            file_name="inspection_report.csv",
+            mime="text/csv"
+        )
     else:
-        st.write("Upload images to see inspection results here.")
+        st.info(
+            "No inspection history yet. Go to Inspect Product "
+            "and inspect an image first."
+        )
 
+# -------------------- MODEL EVALUATION --------------------
+elif page == "Model Evaluation":
+    st.header("📈 Model Evaluation")
+
+    st.write("Previously evaluated test dataset: 715 images")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Accuracy", "99.72%")
+    c2.metric("Precision", "99.24%")
+    c3.metric("Recall", "100.00%")
+
+    st.subheader("Confusion Matrix")
+
+    st.markdown("""
+    | Actual class | Predicted Defective | Predicted Good |
+    |---|---:|---:|
+    | Defective | 451 | 2 |
+    | Good | 0 | 262 |
+    """)
+
+    st.caption(
+        "These metrics are from previously reported test results. "
+        "They are not recalculated by this dashboard."
+    )
+
+# -------------------- FOOTER --------------------
 st.divider()
-st.subheader("📊 Model Evaluation")
-
-st.write("Previously evaluated test dataset: 715 images")
-
-c1, c2, c3 = st.columns(3)
-c1.metric("Accuracy", "99.72%")
-c2.metric("Precision", "99.24%")
-c3.metric("Recall", "100.00%")
-
-st.subheader("Confusion Matrix")
-
-st.markdown("""
-| Actual class | Predicted Defective | Predicted Good |
-|---|---:|---:|
-| Defective | 451 | 2 |
-| Good | 0 | 262 |
-""")
-
 st.caption(
-    "These metrics are from previously reported test results. "
-    "They are not recalculated by this dashboard."
+    "AI Industrial Defect Inspector • Industrial Casting Quality Inspection"
 )
-
-st.divider()
-st.subheader("📄 Inspection Report")
-
-st.write(
-    "Use your browser's Print option to save this page as PDF. "
-    "Downloadable inspection history is not included yet."
-)
-
 st.caption(
-    "Defect heatmaps and visual defect highlighting "
-    "are not implemented in this version."
+    "Visual defect highlighting is not implemented in this version."
 )
